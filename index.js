@@ -66,6 +66,21 @@ async function run() {
       res.send(result);
     });
 
+    // update user data based on email => put
+    app.put("/user/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = req.body;
+      const query = { email };
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: {
+          ...user,
+        },
+      };
+      const result = await usersCollection.updateOne(query, updateDoc, options);
+      res.send(result);
+    });
+
     // ============== Donations Api's =====================
 
     // donation request => post
@@ -75,11 +90,38 @@ async function run() {
       res.send(result);
     });
 
+    // get a single donation req data basen on id => get
+    app.get("/donation/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await donationRequestCollection.findOne(query);
+      res.send(result);
+    });
+
     // delete donation request based on id => delete
     app.delete("/donation-request/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await donationRequestCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // update donation request data => put
+    app.put("/donation-update/:id", async (req, res) => {
+      const id = req.params.id;
+      const donation = req.body;
+      const query = { _id: new ObjectId(id) };
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: {
+          ...donation,
+        },
+      };
+      const result = await donationRequestCollection.updateOne(
+        query,
+        updateDoc,
+        options
+      );
       res.send(result);
     });
 
