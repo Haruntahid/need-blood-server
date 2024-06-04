@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 5000;
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 
 // middlewares
@@ -38,6 +38,8 @@ async function run() {
       res.send("server is running");
     });
 
+    // =============== User's Api's ====================
+
     // all user -> post on registration
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -64,12 +66,32 @@ async function run() {
       res.send(result);
     });
 
-    // donation request => on donor post
+    // ============== Donations Api's =====================
+
+    // donation request => post
     app.post("/donation-request", async (req, res) => {
       const donation = req.body;
       const result = await donationRequestCollection.insertOne(donation);
       res.send(result);
     });
+
+    // delete donation request based on id => delete
+    app.delete("/donation-request/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await donationRequestCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // donation request based on email => get
+    app.get("/donation-request/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const result = await donationRequestCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    //========== District and Upazilas Api's ================
 
     // get all districts
     app.get("/districts", async (req, res) => {
