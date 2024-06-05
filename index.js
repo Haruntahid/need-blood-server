@@ -4,13 +4,18 @@ const app = express();
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+const cookieParser = require("cookie-parser");
+const jwt = require("jsonwebtoken");
 
 // middlewares
 app.use(express.json());
-app.use(cors());
-
-// tahidtaha997
-// 0nSMgjyV3lbrCA9S
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "http://localhost:5174"],
+    credentials: true,
+  })
+);
+app.use(cookieParser());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.elqupzc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -22,6 +27,26 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+// console.log(process.env.ACCESS_TOKEN_SECRET);
+
+// verify jwt middleware
+const verifyToken = async (req, res, next) => {
+  const token = req.cookies?.token;
+  console.log("Token from cookies:", token);
+  if (!token) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    // err
+    if (err) {
+      console.error("Token verification failed:", err);
+      return res.status(401).send({ message: "unauthorized" });
+    }
+    console.log("value token", decoded);
+    req.decoded = decoded;
+    next();
+  });
+};
 
 async function run() {
   try {
@@ -36,6 +61,33 @@ async function run() {
 
     app.get("/", async (req, res) => {
       res.send("server is running");
+    });
+
+    // jwt Token
+    app.post("/jwt", async (req, res) => {
+      const email = req.body;
+      const token = jwt.sign(email, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "30d",
+      });
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        })
+        .send({ success: true });
+    });
+
+    // Clear Jwt token for logout a user
+    app.get("/logout", (req, res) => {
+      res
+        .clearCookie("token", {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+          maxAge: 0,
+        })
+        .send({ success: true });
     });
 
     // =============== User's Api's ====================
@@ -59,7 +111,7 @@ async function run() {
     });
 
     // get a specific user based on email
-    app.get("/users/:email", async (req, res) => {
+    app.get("/users/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
       const result = await usersCollection.findOne(query);
@@ -67,7 +119,7 @@ async function run() {
     });
 
     // update user data based on email => put
-    app.put("/user/:email", async (req, res) => {
+    app.put("/user/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const user = req.body;
       const query = { email };
@@ -86,6 +138,7 @@ async function run() {
     // donation request => post
     app.post("/donation-request", async (req, res) => {
       const donation = req.body;
+      donation.createdAt = new Date();
       const result = await donationRequestCollection.insertOne(donation);
       res.send(result);
     });
@@ -129,7 +182,10 @@ async function run() {
     app.get("/donation-request/:email", async (req, res) => {
       const email = req.params.email;
       const query = { email };
-      const result = await donationRequestCollection.find(query).toArray();
+      const result = await donationRequestCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(result);
     });
 
@@ -150,7 +206,7 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
