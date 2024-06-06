@@ -32,17 +32,14 @@ const client = new MongoClient(uri, {
 // verify jwt middleware
 const verifyToken = async (req, res, next) => {
   const token = req.cookies?.token;
-  console.log("Token from cookies:", token);
   if (!token) {
     return res.status(401).send({ message: "Unauthorized access" });
   }
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     // err
     if (err) {
-      console.error("Token verification failed:", err);
       return res.status(401).send({ message: "unauthorized" });
     }
-    console.log("value token", decoded);
     req.decoded = decoded;
     next();
   });
@@ -88,6 +85,22 @@ async function run() {
           maxAge: 0,
         })
         .send({ success: true });
+    });
+
+    // =============== Admin Api's =====================
+    app.get("/users/role/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user) {
+        return res.status(404).send({ message: "User not found" });
+      }
+      const getRole = user.role;
+      res.send({ getRole });
     });
 
     // =============== User's Api's ====================
