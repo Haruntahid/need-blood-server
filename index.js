@@ -50,6 +50,7 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
     const usersCollection = client.db("needBlood").collection("all-users");
+    const blogCollection = client.db("needBlood").collection("blogs");
     const districtsCollection = client.db("needBlood").collection("districts");
     const upazilasCollection = client.db("needBlood").collection("upazilas");
     const donationRequestCollection = client
@@ -60,6 +61,29 @@ async function run() {
       res.send("server is running");
     });
 
+    // verify admin middleware
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      const isAdmin = user?.role === "Admin";
+      if (!isAdmin) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    // verify volunteer
+    const verifyVolunteer = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      const isVolunteer = user?.role === "Volunteer";
+      if (!isVolunteer) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
     // jwt Token
     app.post("/jwt", async (req, res) => {
       const email = req.body;
@@ -88,6 +112,8 @@ async function run() {
     });
 
     // =============== Admin Api's =====================
+
+    // get the user role
     app.get("/users/role/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
 
@@ -101,6 +127,132 @@ async function run() {
       }
       const getRole = user.role;
       res.send({ getRole });
+    });
+
+    // get total donors and donation req
+    app.get("/overview/donors-requests", verifyToken, async (req, res) => {
+      const query = { role: "Donor" };
+      const donors = await usersCollection.countDocuments(query);
+
+      const donationReq =
+        await donationRequestCollection.estimatedDocumentCount();
+      res.send({ donors, donationReq });
+    });
+
+    // admin access : update status (active/block)=>
+    app.patch("/status/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+
+      const user = await usersCollection.findOne(query);
+
+      const newStatus = user.status === "active" ? "blocked" : "active";
+
+      const updateDoc = {
+        $set: {
+          status: newStatus,
+        },
+      };
+      const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // admin access : update user role
+    app.patch("/role/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const { role: newRole } = req.body;
+
+      const validRoles = ["Donor", "Volunteer", "Admin"];
+      if (!validRoles.includes(newRole)) {
+        return res.status(400).send({ message: "Invalid role for update" });
+      }
+
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          role: newRole,
+        },
+      };
+      const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // volunteer access : update the blood req status
+    app.patch(
+      "/blood-req-status/:id",
+      verifyToken,
+      verifyVolunteer,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+
+        const donationReq = await donationRequestCollection.findOne(query);
+
+        if (donationReq.status === "pending") {
+          const updateDoc = {
+            $set: {
+              status: "in progress",
+            },
+          };
+          const result = await donationRequestCollection.updateOne(
+            query,
+            updateDoc
+          );
+          res.send(result);
+        }
+      }
+    );
+
+    // blog post api
+    app.post("/add-blog", verifyToken, async (req, res) => {
+      const blog = req.body;
+      const result = await blogCollection.insertOne(blog);
+      res.send(result);
+    });
+
+    // get all blogs=>admin volunteer
+    app.get("/all-blogs", verifyToken, async (req, res) => {
+      const result = await blogCollection.find().toArray();
+      res.send(result);
+    });
+
+    // get a single blog based on id
+    app.get("/blog/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await blogCollection.findOne(query);
+      res.send(result);
+    });
+
+    // only admin can published a blog
+    app.patch(
+      "/blog-published/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+
+        const blog = await blogCollection.findOne(query);
+        // Toggle the status between "published" and "draft"
+        const newStatus = blog.status === "published" ? "draft" : "published";
+
+        const updateDoc = {
+          $set: {
+            status: newStatus,
+          },
+        };
+        const result = await blogCollection.updateOne(query, updateDoc);
+        res.send(result);
+      }
+    );
+
+    // only admin can delewte a blog
+    app.delete("/blog/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await blogCollection.deleteOne(query);
+      res.send(result);
     });
 
     // =============== User's Api's ====================
@@ -118,8 +270,11 @@ async function run() {
     });
 
     // get all users data
-    app.get("/users", async (req, res) => {
-      const result = await usersCollection.find().toArray();
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+      const requestingUserEmail = req.decoded.email;
+      const query = { email: { $ne: requestingUserEmail } };
+      // console.log(requestingUserEmail);
+      const result = await usersCollection.find(query).toArray();
       res.send(result);
     });
 
@@ -151,8 +306,23 @@ async function run() {
     // donation request => post
     app.post("/donation-request", async (req, res) => {
       const donation = req.body;
-      donation.createdAt = new Date();
-      const result = await donationRequestCollection.insertOne(donation);
+
+      // Check if the user's status is active
+      const userId = donation.userId;
+      const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+
+      if (user && user.status === "active") {
+        donation.createdAt = new Date();
+        const result = await donationRequestCollection.insertOne(donation);
+        res.send(result);
+      } else {
+        res.send({ message: "Your Account is Blocked" });
+      }
+    });
+
+    // get all donation req admin , volentter
+    app.get("/all-donation-req", verifyToken, async (req, res) => {
+      const result = await donationRequestCollection.find().toArray();
       res.send(result);
     });
 
