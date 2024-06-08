@@ -178,30 +178,25 @@ async function run() {
     });
 
     // volunteer access : update the blood req status
-    app.patch(
-      "/blood-req-status/:id",
-      verifyToken,
-      verifyVolunteer,
-      async (req, res) => {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+    app.patch("/blood-req-status/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
 
-        const donationReq = await donationRequestCollection.findOne(query);
+      const donationReq = await donationRequestCollection.findOne(query);
 
-        if (donationReq.status === "pending") {
-          const updateDoc = {
-            $set: {
-              status: "in progress",
-            },
-          };
-          const result = await donationRequestCollection.updateOne(
-            query,
-            updateDoc
-          );
-          res.send(result);
-        }
+      if (donationReq.status === "pending") {
+        const updateDoc = {
+          $set: {
+            status: "in progress",
+          },
+        };
+        const result = await donationRequestCollection.updateOne(
+          query,
+          updateDoc
+        );
+        res.send(result);
       }
-    );
+    });
 
     // blog post api
     app.post("/add-blog", verifyToken, async (req, res) => {
@@ -246,6 +241,13 @@ async function run() {
         res.send(result);
       }
     );
+
+    // get only published blog
+    app.get("/blog-published", async (req, res) => {
+      const query = { status: "published" };
+      const result = await blogCollection.find(query).toArray();
+      res.send(result);
+    });
 
     // only admin can delewte a blog
     app.delete("/blog/:id", verifyToken, verifyAdmin, async (req, res) => {
@@ -304,12 +306,12 @@ async function run() {
     // ============== Donations Api's =====================
 
     // donation request => post
-    app.post("/donation-request", async (req, res) => {
+    app.post("/donation-request", verifyToken, async (req, res) => {
       const donation = req.body;
 
       // Check if the user's status is active
-      const userId = donation.userId;
-      const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+      const query = { email: donation.email };
+      const user = await usersCollection.findOne(query);
 
       if (user && user.status === "active") {
         donation.createdAt = new Date();
@@ -323,6 +325,13 @@ async function run() {
     // get all donation req admin , volentter
     app.get("/all-donation-req", verifyToken, async (req, res) => {
       const result = await donationRequestCollection.find().toArray();
+      res.send(result);
+    });
+
+    // get all donation req which have the status pending
+    app.get("/donation-req", async (req, res) => {
+      const query = { status: "pending" };
+      const result = await donationRequestCollection.find(query).toArray();
       res.send(result);
     });
 
