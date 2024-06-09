@@ -6,12 +6,17 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
+const stripe = require("stripe")(process.env.STRIPR_SECRET_KEY);
 
 // middlewares
 app.use(express.json());
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "https://need-blood-8367e.web.app",
+    ],
     credentials: true,
   })
 );
@@ -31,12 +36,12 @@ const client = new MongoClient(uri, {
 
 // verify jwt middleware
 const verifyToken = async (req, res, next) => {
-  const token = req.cookies?.token;
-  if (!token) {
+  console.log("inside verify token :", req.headers.authorization);
+  if (!req.headers.authorization) {
     return res.status(401).send({ message: "Unauthorized access" });
   }
+  const token = req.headers.authorization.split(" ")[1];
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-    // err
     if (err) {
       return res.status(401).send({ message: "unauthorized" });
     }
@@ -44,6 +49,21 @@ const verifyToken = async (req, res, next) => {
     next();
   });
 };
+// verify jwt middleware
+// const verifyToken = async (req, res, next) => {
+//   const token = req.cookies?.token;
+//   if (!token) {
+//     return res.status(401).send({ message: "Unauthorized access" });
+//   }
+//   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+//     // err
+//     if (err) {
+//       return res.status(401).send({ message: "unauthorized" });
+//     }
+//     req.decoded = decoded;
+//     next();
+//   });
+// };
 
 async function run() {
   try {
@@ -53,6 +73,7 @@ async function run() {
     const blogCollection = client.db("needBlood").collection("blogs");
     const districtsCollection = client.db("needBlood").collection("districts");
     const upazilasCollection = client.db("needBlood").collection("upazilas");
+    const paymentCollection = client.db("needBlood").collection("payments");
     const donationRequestCollection = client
       .db("needBlood")
       .collection("donationReq");
@@ -74,30 +95,40 @@ async function run() {
     };
 
     // verify volunteer
-    const verifyVolunteer = async (req, res, next) => {
-      const email = req.decoded.email;
-      const query = { email };
-      const user = await usersCollection.findOne(query);
-      const isVolunteer = user?.role === "Volunteer";
-      if (!isVolunteer) {
-        return res.status(403).send({ message: "forbidden access" });
-      }
-      next();
-    };
+    // const verifyVolunteer = async (req, res, next) => {
+    //   const email = req.decoded.email;
+    //   const query = { email };
+    //   const user = await usersCollection.findOne(query);
+    //   const isVolunteer = user?.role === "Volunteer";
+    //   if (!isVolunteer) {
+    //     return res.status(403).send({ message: "forbidden access" });
+    //   }
+    //   next();
+    // };
     // jwt Token
+
     app.post("/jwt", async (req, res) => {
-      const email = req.body;
-      const token = jwt.sign(email, process.env.ACCESS_TOKEN_SECRET, {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
         expiresIn: "30d",
       });
-      res
-        .cookie("token", token, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        })
-        .send({ success: true });
+      res.send({ token });
     });
+    // app.post("/jwt", async (req, res) => {
+    //   const email = req.body;
+    //   const token = jwt.sign(email, process.env.ACCESS_TOKEN_SECRET, {
+    //     expiresIn: "30d",
+    //   });
+    //   res
+    //     .cookie("token", token, {
+    //       httpOnly: true,
+    //       // secure: process.env.NODE_ENV === "production",
+    //       // sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+    //       secure: true,
+    //       sameSite: "strict",
+    //     })
+    //     .send({ success: true });
+    // });
 
     // Clear Jwt token for logout a user
     app.get("/logout", (req, res) => {
@@ -113,7 +144,7 @@ async function run() {
 
     // =============== Admin Api's =====================
 
-    // get the user role
+    // get the user role  ,verify token
     app.get("/users/role/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
 
@@ -177,7 +208,7 @@ async function run() {
       res.send(result);
     });
 
-    // volunteer access : update the blood req status
+    // update the blood req status => only updated volunteer and donor who donate blood
     app.patch("/blood-req-status/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -196,6 +227,24 @@ async function run() {
         );
         res.send(result);
       }
+    });
+
+    // update the blood status for only donor => just cancle and done(only donor)
+    app.patch("/blood-status/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body; // Get status from request body
+      const query = { _id: new ObjectId(id) };
+
+      const updateDoc = {
+        $set: {
+          status: status,
+        },
+      };
+      const result = await donationRequestCollection.updateOne(
+        query,
+        updateDoc
+      );
+      res.send(result);
     });
 
     // blog post api
@@ -249,7 +298,7 @@ async function run() {
       res.send(result);
     });
 
-    // only admin can delewte a blog
+    // only admin can delete a blog
     app.delete("/blog/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -395,6 +444,24 @@ async function run() {
       const query = { district_id: districtId };
       const filteredUpazilas = await upazilasCollection.find(query).toArray();
       res.send(filteredUpazilas);
+    });
+
+    // ================= Payment's Api's ===========================
+
+    // payment intent
+    app.post("/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
     });
 
     // Send a ping to confirm a successful connection
