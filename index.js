@@ -131,16 +131,16 @@ async function run() {
     // });
 
     // Clear Jwt token for logout a user
-    app.get("/logout", (req, res) => {
-      res
-        .clearCookie("token", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-          maxAge: 0,
-        })
-        .send({ success: true });
-    });
+    // app.get("/logout", (req, res) => {
+    //   res
+    //     .clearCookie("token", {
+    //       httpOnly: true,
+    //       secure: process.env.NODE_ENV === "production",
+    //       sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+    //       maxAge: 0,
+    //     })
+    //     .send({ success: true });
+    // });
 
     // =============== Admin Api's =====================
 
@@ -167,7 +167,23 @@ async function run() {
 
       const donationReq =
         await donationRequestCollection.estimatedDocumentCount();
-      res.send({ donors, donationReq });
+
+      // Calculate total payment amount using aggregation
+      const totalAmount = await paymentCollection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$price" }, // Assuming 'price' is the field for payment amount
+            },
+          },
+        ])
+        .toArray();
+
+      // Extract the total amount from the aggregation result
+      const total = totalAmount[0]?.total || 0;
+
+      res.send({ donors, donationReq, total });
     });
 
     // admin access : update status (active/block)=>
@@ -349,6 +365,19 @@ async function run() {
         },
       };
       const result = await usersCollection.updateOne(query, updateDoc, options);
+      res.send(result);
+    });
+
+    // search user
+    app.get("/search-donors", async (req, res) => {
+      const { bloodGroup, district, upazila } = req.query;
+      const query = {};
+
+      if (bloodGroup) query.bloodGroup = bloodGroup;
+      if (district) query.district = district;
+      if (upazila) query.upazila = upazila;
+
+      const result = await usersCollection.find(query).toArray();
       res.send(result);
     });
 
